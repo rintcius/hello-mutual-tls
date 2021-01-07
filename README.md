@@ -3,6 +3,7 @@
 ## Generate certs
 
 ```
+mkdir -p src/main/resources/combi
 sh ./gen-certs.sh
 ```
 
