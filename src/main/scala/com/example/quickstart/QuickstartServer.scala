@@ -1,0 +1,47 @@
+package com.example.quickstart
+
+import cats.effect.{ConcurrentEffect, Timer}
+import cats.implicits._
+import fs2.Stream
+import org.http4s.client.blaze.BlazeClientBuilder
+import org.http4s.implicits._
+import org.http4s.server.blaze.BlazeServerBuilder
+import org.http4s.server.middleware.Logger
+import scala.concurrent.ExecutionContext.global
+import cats.effect.Sync
+import fs2.io.tls.TLSParameters
+
+object QuickstartServer {
+
+  def context[F[_]: Sync] =
+    ssl.loadContextFromClasspath(ssl.keystorePassword, ssl.keyManagerPassword, ssl.combiPath)
+
+  def stream[F[_]: ConcurrentEffect](needClientAuth: Boolean)(implicit T: Timer[F]): Stream[F, Nothing] = {
+    for {
+      client <- BlazeClientBuilder[F](global).stream
+      helloWorldAlg = HelloWorld.impl[F]
+      jokeAlg = Jokes.impl[F](client)
+
+      // Combine Service Routes into an HttpApp.
+      // Can also be done via a Router if you
+      // want to extract a segments not checked
+      // in the underlying routes.
+      httpApp = (
+        QuickstartRoutes.helloWorldRoutes[F](helloWorldAlg) <+>
+        QuickstartRoutes.jokeRoutes[F](jokeAlg)
+      ).orNotFound
+
+      // With Middlewares in place
+      finalHttpApp = Logger.httpApp(true, true)(httpApp)
+
+      ctx <- Stream.eval(context[F])
+      pars = TLSParameters(needClientAuth = needClientAuth).toSSLParameters
+
+      exitCode <- BlazeServerBuilder[F](global)
+        .bindHttp(8080, "0.0.0.0")
+        .withSslContextAndParameters(ctx, pars)
+        .withHttpApp(finalHttpApp)
+        .serve
+    } yield exitCode
+  }.drain
+}
